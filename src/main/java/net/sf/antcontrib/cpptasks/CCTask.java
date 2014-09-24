@@ -259,6 +259,9 @@ public class CCTask extends Task {
      * files as possible before throwing a BuildException
      */
     private boolean relentless;
+	private Integer batchSize;
+    private Integer useCores;
+	
     public CCTask() {
     }
     /**
@@ -743,7 +746,7 @@ public class CCTask extends Task {
                 //
                 
                 // BEGINFREEHEP
-                int noOfCores = Runtime.getRuntime().availableProcessors();
+                int noOfCores = useCores==null ? Runtime.getRuntime().availableProcessors() : useCores.intValue();
                 log("Found "+noOfCores+" processors available");
                 if (maxCores > 0) {
                     noOfCores = Math.min(maxCores, noOfCores);
@@ -777,7 +780,7 @@ public class CCTask extends Task {
                 Core[] cores = new Core[noOfCores];
                 for (int j = 0; j < cores.length; j++) {
                     cores[j] = new Core(this, j, config, _objDir, sourceFiles[j],
-                            relentless, monitor);
+                            relentless, monitor, batchSize);
                     log("\nStarting Core " + j + " with "
                             + sourceFiles[j].size() + " source files...");
                 }
@@ -967,10 +970,11 @@ public class CCTask extends Task {
         private boolean relentless;
         private CCTaskProgressMonitor monitor;
         private Exception compileException;
+		private Integer batchSize;
 
         Core(CCTask task, int coreNo, CompilerConfiguration config, File objDir,
                 List set, boolean relentless,
-                CCTaskProgressMonitor monitor) {
+                CCTaskProgressMonitor monitor, Integer batchSize) {
             super("Core "+coreNo);
             this.task = task;
             this.config = config;
@@ -978,6 +982,7 @@ public class CCTask extends Task {
             this.sourceFiles = set;
             this.relentless = relentless;
             this.monitor = monitor;
+            this.batchSize = batchSize;
         }
 
         public Exception getException() {
@@ -987,10 +992,46 @@ public class CCTask extends Task {
         public void run() {
             super.run();
             try {
-                String[] sources = new String[sourceFiles.size()];
-                sources = (String[]) sourceFiles.toArray(sources);
-                
-                config.compile(task, objDir, sources, relentless, monitor);
+            	int batchSize = this.batchSize == null ? sourceFiles.size() : this.batchSize.intValue();
+            	
+            	ArrayList batches  = new ArrayList( sourceFiles.size() / batchSize );
+            	ArrayList exceptions  = new ArrayList( );
+        		
+            	ArrayList batch = new ArrayList ( batchSize );
+
+        		for (int i=0;i<sourceFiles.size();i++)
+            	{
+        			String srcFile = (String) sourceFiles.get(i);
+        			
+        			File modsFile = new File(srcFile.concat(".override"));
+        			if (modsFile.exists() && !modsFile.isDirectory()) {
+        				exceptions.add(srcFile);
+        				continue;
+        			}
+        			if (batch.size()>=batchSize) {
+        				batches.add(batch);
+        				batch = new ArrayList ( batchSize );
+        			}
+        			batch.add(srcFile);
+            	}
+        		if (batch.size()>0) {
+        			batches.add(batch);
+        		}
+        		for (int i=0;i<batches.size();i++)
+        		{
+        			batch = (ArrayList) batches.get(i);
+                	String[] sources = new String[batch.size()];
+                	sources = (String[]) batch.toArray(sources);
+                    
+                    config.compile(task, objDir, sources, relentless, monitor);
+        		}
+        		for (int i=0;i<exceptions.size();i++)
+        		{
+                	String[] sources = new String[exceptions.size()];
+                	sources = (String[]) exceptions.toArray(sources);
+                	
+                    config.compile(task, objDir, sources, relentless, monitor);
+        		}
             } catch (Exception ex) {
                 if (compileException == null) {
                     compileException = ex;
@@ -1738,4 +1779,13 @@ public class CCTask extends Task {
         newVersionInfo.setProject(this.getProject());
         versionInfos.addElement(newVersionInfo);
     }
+    
+    public void setCores(int cores) {
+        this.useCores = Integer.valueOf(cores);
+    }
+    
+    public void setBatchSize(int batchSize) {
+    	this.batchSize = Integer.valueOf(batchSize);
+    }
+    
 }
